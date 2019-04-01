@@ -1,0 +1,226 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+
+Начальная инициализациия. Достаём данные, считаем по ним какие-то статистики. Оцениваем максимальное MSR. 
+Добавляем biclust и заводим переменную l для бикластеорв.
+```{r}
+#INIT
+library(multtest)
+data(golub)
+max_val<-max(golub)
+min_val<-min(golub)
+max_delta <- ((max_val-min_val)**2)/12
+mean_val<-mean(golub)
+med_val <- median(golub)
+cat(max_delta)
+library(biclust)
+rm(l)
+l=list()
+```
+
+Применим алгоритм CC.
+Определение параметров: Если матрица получена случайным выбором значений из отрезка [a,b] , то её дельта параметр не больше чем (b-a)2/12. В нашем случае это 2.526235. Альфа как и в оригинальной статье 1.2. 
+```{r}
+#CHENG AND CHURCH
+start_d =0.001
+end_d=1
+step_d=0.01
+cc_count =(end_d-start_d)/step_d +1 
+print(cc_count)
+cc_num= 5
+cc_al=1.2
+l=list()
+for (cc in (0:(cc_count-1))){
+  d=start_d + cc * step_d
+  bic=biclust(golub, method=BCCC(), delta=d, alpha=cc_al, number=cc_num) 
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("CC", bic_num$Rows,bic_num$Cols, list(d,cc_al) )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+ 
+}
+ cat("общее количество бикластеров:",length(l))
+```
+Применим BiMax для поиска бикластеров. Сначала бинаризуем данные, вызвав соответствующую функцию, а затем уже запустим алгоритм. Кроме того, зададим минимальный размер бикластера как 3 на 3,т.к. нас не интересуют совсем тривиальные случаи.
+```{r}
+#bimax
+
+bimax_minr=3
+bimax_minc=3
+bimax_num=50
+bin_data <- binarize(golub,2) 
+res <- biclust(x=bin_data, method=BCBimax(), minr=bimax_minr, minc=bimax_minc, number=bimax_num)
+
+for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("BiMax", bic_num$Rows, bic_num$Cols, list(bimax_minr,bimax_minc,bimax_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+}
+ cat("общее количество бикластеров:",length(l))
+```
+Запустим версию BiMax, которая ограничена сверху по числу столбцов в бикластере. Нас не интересуют очень маленькие или очень большие бикластеры. Т.к. мы надеемся посмотреть связь с изначальными классами пациентов.
+```{r}
+#bimax c ограниченным числом столбцов ???
+
+bimax_minr=3
+bimax_minc=3
+bimax_maxc=20
+bimax_num=10
+bin_data <- binarize(golub,2)
+for (bimax_col in (5:20)){
+  res <- biclust(x=bin_data, method=BCrepBimax(), minr=bimax_minr, minc=bimax_minc, number=bimax_num,maxc=bimax_col)
+
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("BCrepBimax", bic_num$Rows,bic_num$Cols, list(bimax_minr,bimax_minc,bimax_col,bimax_num) )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+}
+
+cat("общее количество бикластеров:",length(l))
+```
+
+Используем также алгоритм Fabia
+
+```{r}
+library(fabia)
+fab_count= 5
+fab_num=10
+for( i in  (1:fab_count)){
+  res<- fabia(X =golub,cyc = 500,p = fab_num )
+  rb <- extractBic(res)
+  for (fab_ind in (1:fab_num)){
+    elem = list("fabia", rb$numn[fab_ind,]$numng,rb$numn[fab_ind,]$numnp, list(500,fab_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+
+}
+cat("общее количество бикластеров:",length(l))
+```
+```{r}
+library(hu6800.db)
+db=hu6800.db
+# columns(db)
+# ens_genes=list()
+# for( man_id in golub.gnames[,3]){
+#   
+# ens_g=select(db,keys=c(man_id),columns=c("ENSEMBL"))
+# ens_genes<-c(ens_genes,list(ens_g))
+# }
+
+```
+```{r}
+columns(db)
+```
+```{r}
+select(db,keys = c("D13748_at"),columns = c("REFSEQ"))
+
+```
+
+
+```{r}
+library(topGO)
+ affyLib <- paste("hu6800", "db", sep = ".")
+library(package = affyLib, character.only = TRUE)
+
+ universe =golub.gnames[,3]
+ bic_rows <- golub.gnames[l[[1]]$rows,3] 
+ names(universe)<-c("atr")  
+   
+  inter_genes= factor(as.integer(universe %in% bic_rows))
+  names(inter_genes) = universe
+
+ sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP",allGenes = inter_genes,nodeSize = 1,annot = annFUN.db, affyLib = affyLib)
+graph(sampleGOdata)
+
+
+ 
+```
+```{r}
+# str(sampleGOdata)
+str(inter_genes)
+summary(inter_genes)
+print(inter_genes)
+```
+
+```{r}
+ a <- genes(sampleGOdata) ## obtain the list of genes 
+head(a)
+selGenes <- sample(a, 5)
+gs <- geneScore(sampleGOdata, whichGenes = selGenes)
+print(gs)
+
+```
+
+```{r}
+library(topGO)
+library(ALL)
+data(ALL)
+data(geneList)
+ affyLib <- paste(annotation(ALL), "db", sep = ".")
+library(package = affyLib, character.only = TRUE)
+sum(topDiffGenes(geneList))
+```
+```{r}
+str(inverseList(annFUN.db("BP", feasibleGenes = NULL, affyLib)))
+```
+
+```{r}
+# some_names<- hu6800UNIGENE  
+# print ( as.list(some_names[c(golub.gnames[,3])])[1:10])
+# x=0
+# for (variable in as.list(some_names[c(golub.gnames[,3])])) {
+#   print(variable)
+#   print("\n")
+#   if (is.na(variable)) {
+#     x=x+1
+#   }
+# }
+# print(x)
+``` 
+```{r}
+# ## S4 method for signature 'matrix,BCCC'
+# x=golub
+# disk_x =discretize(golub)
+# res=  biclust(X,method=BCs4vd,pcerv=1,pceru=1,pointwise=TRUE,nbiclust=3)
+# res
+#  parallelCoordinates(x=disk_x, bicResult=res, number=2)
+# 
+# #drawHeatmap(x=disk_x,bicResult=res,plotALL=TRUE) 
+```
+
+```{r}
+ # rb <- extractBic(res)
+ # plotBicluster(rb,2)
+ # str(rb$bic[1,])
+ # writeLines(rb$bic[1,]$biypn)
+ # 
+
+
+```
+
+```{r}
+ # for (i in (1:length(golub.cl))) {
+ #   cat(i, " ",golub.cl[i],"\n")
+ #   
+ # }
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

@@ -25,6 +25,10 @@ library(biclust)
 rm(l)
 l=list()
 ```
+```{r}
+str(var(golub))
+```
+
 
 Применим алгоритм CC.
 Определение параметров: Если матрица получена случайным выбором значений из отрезка [a,b] , то её дельта параметр не больше чем (b-a)2/12. В нашем случае это 2.526235. Альфа как и в оригинальной статье 1.2. 
@@ -97,8 +101,9 @@ cat("общее количество бикластеров:",length(l))
 library(fabia)
 fab_count= 5
 fab_num=10
+fab_sp_step=0.1
 for( i in  (1:fab_count)){
-  res<- fabia(X =golub,cyc = 500,p = fab_num )
+  res<- fabia(X =golub,cyc = 500,p = fab_num,center=1,norm=1 )
   rb <- extractBic(res)
   for (fab_ind in (1:fab_num)){
     elem = list("fabia", rb$numn[fab_ind,]$numng,rb$numn[fab_ind,]$numnp, list(500,fab_num))
@@ -106,30 +111,41 @@ for( i in  (1:fab_count)){
     l<-c(l,list(elem))
   
   }
-
+}
+cat("общее количество бикластеров:",length(l))
+#модернизация с разреженностьюBi
+for( i in  (1:fab_count)){
+  res<- fabias(X =golub,alpha= fab_sp_step*i,cyc = 500,p = fab_num,center=1,norm=1 )
+  rb <- extractBic(res)
+  for (fab_ind in (1:fab_num)){
+    elem = list("fabias", rb$numn[fab_ind,]$numng,rb$numn[fab_ind,]$numnp, list(500,fab_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
 }
 cat("общее количество бикластеров:",length(l))
 ```
-```{r}
-library(hu6800.db)
-db=hu6800.db
-# columns(db)
-# ens_genes=list()
-# for( man_id in golub.gnames[,3]){
-#   
-# ens_g=select(db,keys=c(man_id),columns=c("ENSEMBL"))
-# ens_genes<-c(ens_genes,list(ens_g))
-# }
+Алгоритм спектральной бикластеризации
 
-```
 ```{r}
-columns(db)
-```
-```{r}
-select(db,keys = c("D13748_at"),columns = c("REFSEQ"))
 
+rm(l)
+l=list()
+  bic=biclust(golub, method=BCSpectral(), minr=3,minc=3,normalization="bistochastization",numberOfEigenvalues =1) 
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("spectral", bic_num$Rows,bic_num$Cols, list("log") )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+ 
+
+ cat("общее количество бикластеров:",length(l))
 ```
 
+
+Строим объект для TopGO. Он подгружает граф и аннотации для дальнейшего исследования. Указываем какие гены нас интересуют - гены одного из бкластеоров
 
 ```{r}
 library(topGO)
@@ -144,38 +160,76 @@ library(package = affyLib, character.only = TRUE)
   names(inter_genes) = universe
 
  sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP",allGenes = inter_genes,nodeSize = 1,annot = annFUN.db, affyLib = affyLib)
-graph(sampleGOdata)
+
 
 
  
 ```
+
+
+Для скольки не нашлось аннотаций
+```{r}
+
+groupProb <- integer(length(universe)) + 1
+groupProb[universe %in% genes(sampleGOdata)] <- 0
+groupProb <- factor(groupProb, labels = c("Used", "Not annotated"))
+tt <- table(groupProb)
+tt
+
+```
+enrichment анализ в топГО
+```{r}
+
+# ug <- usedGO(sampleGOdata)
+# head(ug)
+# sel.terms <- sample(usedGO(sampleGOdata), 10)
+# num.ann.genes <- countGenesInTerm(sampleGOdata, sel.terms) ## the number of annotated genes 
+# num.ann.genes
+# ann.genes <- genesInTerm(sampleGOdata, sel.terms) ## get the annotations > head(ann.genes)
+# ann.score <- scoresInTerm(sampleGOdata, sel.terms)
+# head(ann.score) 
+# ann.score <- scoresInTerm(sampleGOdata, sel.terms, use.names = TRUE) 
+# head(ann.score)
+# 
+#  termStat(sampleGOdata, sel.terms)
+
+```
+
+Какая-то хрень с тестом фишера выдаёт фигню
+```{r}
+# my.group <- new("classicCount", testStatistic = GOFisherTest, name = "fisher", allMembers= genes(sampleGOdata), groupMembers = bic_rows  )
+# contTable(my.group)
+#  runTest(my.group)
+# test.stat <- new("classicCount", testStatistic = GOFisherTest, name = "Fisher test") 
+# resultFisher <- getSigGroups(sampleGOdata, test.stat)
+```
+
+
+```{r}
+# resultFisher
+#  showSigOfNodes(sampleGOdata, firstSigNodes = 6, useInfo = 'all')
+```
+
 ```{r}
 # str(sampleGOdata)
-str(inter_genes)
-summary(inter_genes)
-print(inter_genes)
+# str(inter_genes)
+# summary(inter_genes)
+# print(inter_genes)
 ```
 
-```{r}
- a <- genes(sampleGOdata) ## obtain the list of genes 
-head(a)
-selGenes <- sample(a, 5)
-gs <- geneScore(sampleGOdata, whichGenes = selGenes)
-print(gs)
 
-```
 
 ```{r}
-library(topGO)
-library(ALL)
-data(ALL)
-data(geneList)
- affyLib <- paste(annotation(ALL), "db", sep = ".")
-library(package = affyLib, character.only = TRUE)
-sum(topDiffGenes(geneList))
-```
-```{r}
-str(inverseList(annFUN.db("BP", feasibleGenes = NULL, affyLib)))
+# library(topGO)
+# library(ALL)
+# data(ALL)
+# data(geneList)
+#  affyLib <- paste(annotation(ALL), "db", sep = ".")
+# library(package = affyLib, character.only = TRUE)
+# sum(topDiffGenes(geneList))
+# ```
+# ```{r}
+# str(inverseList(annFUN.db("BP", feasibleGenes = NULL, affyLib)))
 ```
 
 ```{r}
@@ -217,6 +271,608 @@ str(inverseList(annFUN.db("BP", feasibleGenes = NULL, affyLib)))
  #   cat(i, " ",golub.cl[i],"\n")
  #   
  # }
+```
+Найдём id для которых нет аннотаций в базе (218 штук)
+```{r}
+res_sel = select(db,keys = golub.gnames[,3] ,columns = c("PROBEID","SYMBOL"))
+f = function(x){(return (is.na(x[2])))}
+bad_ids = dplyr::filter(res_sel[1],is.na(res_sel[2]) ) 
+str(bad_ids)
+```
+Запрос к бд на поиск символов в первом бикластере
+```{r}
+columns(db)
+res_sel = select(db,keys = golub.gnames[l[[1]]$rows,3] ,columns = c("PROBEID","ENSEMBL"))
+print(res_sel)
+```
+
+Пакет GoFUNCR для автоматического анализа и гепергеометрического теста
+```{r}
+# BiocManager::install('Homo.sapiens')
+# BiocManager::install("GOfuncR")
+library(GOfuncR)
+find_sign_go =function (bic_rows){
+hyp_cand_ids<- select(db,keys = bic_rows ,columns = c("PROBEID","SYMBOL"))
+hyp_bg_ids <-  select(db,keys = golub.gnames[,3] ,columns = c("PROBEID","SYMBOL"))
+
+hyp_bg_ids <-dplyr::filter(hyp_bg_ids,!is.na(hyp_bg_ids[2]) & !(hyp_bg_ids[2] %in% hyp_cand_ids[2,]) )
+hyp_cand_ids <- dplyr::filter(hyp_cand_ids,!is.na(hyp_cand_ids[2]) )
+
+
+hyp_is_cand <- c(rep(1,length(hyp_cand_ids$SYMBOL)), rep(0,length(hyp_bg_ids$SYMBOL)))
+input_hyper_bg = data.frame(gene_ids = c(hyp_cand_ids$SYMBOL, hyp_bg_ids$SYMBOL), hyp_is_cand)  
+
+res_hyper_bg = go_enrich(input_hyper_bg, n_randsets=100,orgDb = 'hu6800.db',silent = TRUE)
+(return (res_hyper_bg))
+}
+l_enrich=list()
+names(l)= c("num","res")
+for (i in 1:length(l)){
+  bic_rows <- golub.gnames[l[[i]]$rows,3] 
+  print("=======================================================")
+  print(bic_rows)
+  print(i)
+  loc_res = find_sign_go(bic_rows)
+  
+   sm1 =summary(loc_res$results$FWER_underrep)
+  sm2 =summary(loc_res$results$FWER_overrep)
+  cat("\n ",names(sm1), "\n under:\n", sm1, "\n over: \n",sm2)
+  elem = list(i,loc_res)
+  names(elem)<- c("num","res")
+  l_enrich<-c(l_enrich,list(elem))
+}
+
+```
+```{r}
+str(l_enrich[[1]]$res$)
+```
+
+```{r}
+library(ggplot2)
+x_raw =t(golub)
+X <- scale(x_raw, center = TRUE, scale = FALSE) # Центрируем
+A <- cov(X)
+E <- eigen(A)            # Спектральное разложение
+U <- E$vectors           # Собственные векторы
+Lambda <- E$values       # Собственные числа
+dimnames(U) <- list(colnames(X),paste0("PC", 1:ncol(X)))
+
+Y <- X %*% U # Координаты точек в новом пространстве
+
+gg <- ggplot()+geom_point(size = 2)  +geom_hline(yintercept = 0) + 
+  geom_vline(xintercept = 0)+aes(x = PC2, y = PC3)
+gg_rotated <- gg %+% as.data.frame(Y) + 
+  labs(title = "После вращения") 
+gg_rotated
+
+library(vegan)
+prot_pca <- rda(x_raw, 
+                scale = TRUE)
+biplot(prot_pca)
+
+screeplot(prot_pca, type = "lines", bstick = TRUE) # график собственных чисел
+```
+
+```{r}
+gol_cl =as.matrix(golub.cl,ncol=1,byrow=T)
+
+colnames(gol_cl)=c("class")
+df_scores <- data.frame(gol_cl,
+  scores(prot_pca, display = "sites", choices = c(1, 2, 3), scaling = "sites"))
+
+p_scores <- ggplot(df_scores, aes(x = PC1, y = PC2)) + 
+  geom_point(size = 2,aes( colour = class))
+p_scores
+
+
+
+df_load <- as.data.frame(scores(prot_pca, display = "species", 
+                                choices = c(1, 2, 3), scaling = "species"))
+
+library(grid) # для стрелочек
+ar <- arrow(length = unit(0.25, "cm"))
+
+p_load <- ggplot(df_load) + 
+  geom_segment(aes(x = 0, y = 0, xend = PC1, yend = PC2), 
+               colour = "grey40", arrow = ar)
+
+p_load
+```
+permanova
+```{r}
+library(vegan)
+x=t(golub)
+gol_cl =as.matrix(golub.cl,ncol=1,byrow=T)
+colnames(gol_cl)=c("class")
+colnames(x)=golub.gnames[,3]
+x=cbind(x,Class=gol_cl)
+x=as.data.frame(x)
+#проверка внутригрупповых дисперсий
+	dist_pesch <- vegdist(x[,1:3051], method  = "euclidean")
+	PCO_pesch <- betadisper(dist_pesch, x$class)
+	plot(PCO_pesch)
+	anova(PCO_pesch)
+	boxplot(PCO_pesch)
+	permanova_pesch <- adonis(x[1:3000] ~ x$class, method = "euclidian",permutations = 999)
+	permanova_pesch
+
+```
+anosim manual
+```{r}
+library(ggplot2)
+R_perm <- function(comm, group){
+  require(vegan)
+  dist_x <- vegdist(x, method = "euclidean")
+  rank_dist_x<- rank(dist_x)
+  dummy_dist <- dist(sample(as.numeric(group))) #Перемешиваем группы
+  dummy_dist <- ifelse(dummy_dist == 0, 0, 1)
+  dists <- data.frame(rank = rank_dist_x, dummy = as.vector(dummy_dist))
+  require(dplyr)
+  mean_dists <- dists %>% group_by(dummy) %>% summarize(rank_type = mean(rank))
+  n <- nrow(x)
+  R_perm <- (mean_dists$rank_type[2] - mean_dists$rank_type[1])/(n * (n - 1)/4) 
+  R_perm
+} 
+
+
+R_perms <-  rep(NA, 10000)
+dist_x <- vegdist(x, method = "euclidean")
+rank_dist_x <- rank(dist_x)
+dummy_dist <- dist(as.numeric(x$class))
+dummy_dist <- ifelse(dummy_dist == 0, 0, 1)
+dists <- data.frame(rank = rank_dist_x, dummy = as.vector(dummy_dist))
+library(dplyr)
+mean_dists <- dists %>% group_by(dummy) %>% summarize(rank_type = mean(rank))
+n <- nrow(x)
+R_glob <- (mean_dists$rank_type[2] - mean_dists$rank_type[1])/(n * (n - 1)/4) 
+for(i in 1:9999) R_perms[i] <- R_perm(comm = x, group = x$class)
+R_perms[10000]=R_glob
+Pl_manual <- ggplot(data.frame(R_perms), aes(x = R_perms)) + 
+  geom_histogram(binwidth = 0.01) + 
+  geom_vline(xintercept = R_glob, linetype = 2) + xlim(-0.4, 0.4) 
+Pl_manual
+```
+```{r}
+library(ggplot2)
+com_anosim <- anosim(x, 
+           grouping = x$class, 
+           permutations = 9999, 
+           distance = "euclidian")
+anosim_perm <- data.frame(perm = com_anosim$perm)
+
+anosim_perm[(com_anosim$permutations + 1), 1] <- com_anosim$statistic
+
+Pl_prof <- ggplot(anosim_perm, aes(x = perm)) + 
+  geom_histogram(binwidth = 0.01, color = "black", fill = "blue") + 
+  geom_vline(xintercept = com_anosim$statistic, linetype = 2)  + xlim(-0.4, 0.4)
+Pl_prof
+
+```
+Результаты anosim
+```{r}
+summary(com_anosim)
+plot(com_anosim)
+```
+Семантическая близость, достаём граф GOSIm
+```{r}
+library(igraph)
+library(GOSim)
+library(hu6800.db)
+ data("ICsBPhumanall")
+db=hu6800.db
+data("ICsBPhumanall")
+othman_a =0.5
+othman_b=0.5
+probe_gene_A= "AFFX-HUMISGF3A/M97935_MB_at"
+probe_gene_B= "AFFX-HUMISGF3A/M97935_MA_at"
+par_GO=getParents()
+anc_GO = getAncestors()
+res_sel_A = AnnotationDbi::select(db,keys =probe_gene_A ,columns = c("PROBEID","ENTREZID","GO"))
+GOs_A = dplyr::filter(res_sel_A[3], res_sel_A[5]=="BP" ) 
+GOs_A=unlist(GOs_A)
+res_sel_B = AnnotationDbi::select(db,keys =probe_gene_B,columns = c("PROBEID","ENTREZID","GO"))
+GOs_B = dplyr::filter(res_sel_B[3], res_sel_B[5]=="BP" ) 
+GOs_B=unlist(GOs_B)
+cat("анализ генов: \n", 
+    probe_gene_A, " термов: ", length(GOs_A),"\n",
+    probe_gene_B, " термов: ", length(GOs_B),"\n=======\n"  )
+probe_dist=Inf
+for(i in 1:length(GOs_A)){
+  for (j in 1:length(GOs_B)) {
+    
+    G=getGOGraph(c(GOs_A[i],GOs_B[j]))
+    cat("пара термов:", i, "   " , j, "\n",
+        "размер графа: ",length(G@nodes) ," узлов ", length(G@edgeData@data)  ," рёбер\n")
+    DAG=igraph.from.graphNEL(G)
+    e_mean=length(G@edgeData@data)/length(G@nodes)
+    anc_A= anc_GO[GOs_A[i]]
+    anc_B= anc_GO[GOs_B[j]]
+    anc_com= intersect(anc_A[[1]],anc_B[[1]])
+    stack_df= data.frame(c(GOs_A[i],GOs_B[j]),stringsAsFactors =F)
+    names(stack_df)=c("GOs")
+    stack_pointer=1
+    sum_dist=0
+    while (nrow(stack_df)>=stack_pointer) {
+     
+      c_node=stack_df$GOs[stack_pointer]
+      rod= ego(graph = DAG,nodes = c_node,mode = "out",mindist = 1)
+       # cat("node", c_node," родителей ", length(rod[[1]]), "\n")
+      for (p_node in names(rod[[1]])) {
+        e_loc= length(ego(graph = DAG,nodes = p_node,mode = "in", mindist=1)[[1]])
+        d_p=distances(graph = DAG,v = p_node,to = "all")
+        t_cp=1
+        if (p_node%in% par_GO[[c_node]][grep("is_a",names( par_GO[[c_node]]))]){
+          t_cp=0.8
+        }
+          if (p_node%in% par_GO[[c_node]][grep("part_of",names( par_GO[[c_node]]))]){
+          t_cp=0.6
+        }
+        w=(othman_b+(1-othman_b)*e_mean/e_loc)*(((d_p+1)/d_p)**othman_a)*(IC[c_node]-IC[p_node])*t_cp
+        if(!is.na(w)&(w!=Inf) &(w!=-Inf)){
+           #cat(p_node," w = ", w, " dist ", sum_dist, "\n")
+          sum_dist=sum_dist+w
+          if (!(p_node%in%anc_com ) & !(p_node%in%stack_df$GOs)) {
+              stack_df=rbind(stack_df,p_node)
+          }
+        }
+      }
+    stack_pointer=stack_pointer+1
+    }
+    
+    cat("term dist " , sum_dist , "\n ================\n")
+    
+    probe_dist=min(sum_dist,probe_dist)
+    sum_dist=0
+  }
+}
+print(probe_dist)
+if(require(igraph)){ 
+ # g=igraph.from.graphNEL(G[[1]])
+  g=igraph.from.graphNEL(G)
+  plot(g, vertex.label=V(g)$name) 
+}
+```
+честный минимум
+```{r}
+library(igraph)
+library(GOSim)
+library(hu6800.db)
+library(multtest)
+data(golub)
+db=hu6800.db
+columns(db)
+d_set =golub
+data("ICsBPhumanall")
+par_GO=getParents()
+anc_GO = getAncestors()
+rownames(d_set)=golub.gnames[,3]
+res_sel = AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","GO"))
+good_ids =unique (dplyr::filter(res_sel[1],!is.na(res_sel[2])&!is.na(res_sel[3])& res_sel[4]=="BP" ) )
+
+entr_sel=AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","ENTREZID"))
+ 
+cat("проб с entrez_id ",length(good_ids$PROBEID),"\n")
+d_set= d_set[unlist(good_ids$PROBEID),]
+dist_matr_min= matrix(nrow = nrow(d_set),ncol = nrow(d_set),dimnames = list(rownames(d_set),rownames(d_set)))
+dist_matr_sum= matrix(nrow = nrow(d_set),ncol = nrow(d_set),dimnames = list(rownames(d_set),rownames(d_set)))
+
+
+gene_sim=function(probe_gene_A,probe_gene_B,othman_a,othman_b){
+    res_sel_A = AnnotationDbi::select(db,keys =probe_gene_A ,columns = c("PROBEID","GO"))
+    GOs_A = unique(dplyr::filter(res_sel_A[2], res_sel_A[4]=="BP" ))
+    GOs_A=unlist(GOs_A)
+    
+    res_sel_B = AnnotationDbi::select(db,keys =probe_gene_B,columns = c("PROBEID","GO"))
+    GOs_B = unique(dplyr::filter(res_sel_B[2], res_sel_B[4]=="BP" )) 
+    GOs_B=unlist(GOs_B)
+    
+    probe_dist=Inf
+    all_GOs= union(GOs_A,GOs_B)
+    G=getGOGraph(all_GOs)
+    DAG=igraph.from.graphNEL(G)
+    e_mean=length(G@edgeData@data)/length(G@nodes)
+    GOs_A=base::sample(x = GOs_A,size = 5,replace = TRUE)
+    GOs_B=base::sample(x = GOs_B,size = 5,replace = TRUE)
+    for(i in 1:length(GOs_A)){
+      for (j in 1:length(GOs_B)) {
+        sum_dist=0
+        if(GOs_A[i]==GOs_B[j]){
+          sum_dist=0
+        }
+        else{
+            anc_A= anc_GO[GOs_A[i]]
+            anc_B= anc_GO[GOs_B[j]]
+            anc_com= intersect(anc_A[1],anc_B[1])
+            # stack_df= data.frame(c(GOs_A[i],GOs_B[j]),stringsAsFactors =F)
+            stack_list=c(GOs_A[i],GOs_B[j])
+            # names(stack_df)=c("GOs")
+            stack_pointer=1
+            while (length(stack_list)>=stack_pointer) {
+              # c_node=stack_df$GOs[stack_pointer]
+              c_node=stack_list[stack_pointer]
+              rod= ego(graph = DAG,nodes = c_node,mode = "out",mindist = 1)
+              d_c=distances(graph = DAG,v = c_node,to = "all")
+              for (p_node in names(rod[[1]])) {
+                e_loc= length(ego(graph = DAG,nodes = p_node,mode = "in", mindist=1)[[1]])
+                d_p=d_c-1
+                t_cp=1
+                # if (p_node%in% par_GO[[c_node]][grep("is_a",names( par_GO[[c_node]]))]){
+                #   t_cp=0.8
+                # }
+                #   if (p_node%in% par_GO[[c_node]][grep("part_of",names( par_GO[[c_node]]))]){
+                #   t_cp=0.6
+                # }
+                w=(othman_b+(1-othman_b)*e_mean/e_loc)*(((d_p+1)/d_p)**othman_a)*(IC[c_node]-IC[p_node])*t_cp
+                if(!is.na(w)&(w!=Inf) &(w!=-Inf)){
+                  sum_dist=sum_dist+w
+                  if (!(p_node%in%anc_com )) {
+                    if(  !(p_node%in%stack_list)){
+                      # stack_df=rbind(stack_df,p_node)
+                      stack_list=c(stack_list,p_node)
+                    }
+                  }
+                }
+              }
+            stack_pointer=stack_pointer+1
+            }
+        }
+        dist_matr_sum[probe_gene_A,probe_gene_B]= dist_matr_sum[probe_gene_A,probe_gene_B]+sum_dist   
+        probe_dist=min(sum_dist,probe_dist)
+        sum_dist=0
+      }
+    }
+    return(probe_dist)
+      
+}
+
+start_time= proc.time()
+for (i in (1:length(good_ids$PROBEID))) {
+  cat("========= gene ", i, " ==========\n")
+  for (j in i:length(good_ids$PROBEID)) {
+    gene_A=rownames(d_set)[i]
+    gene_B=rownames(d_set)[j]
+    cat("гены ",gene_A,", ",gene_B,": ", i, ", ",j ,"\n")
+    if (i==j){
+      dist_matr_min[gene_A,gene_B]= 0
+      dist_matr_sum[gene_A,gene_B]=0
+    }
+    else{
+    dist_matr_min[gene_A,gene_B]= gene_sim(probe_gene_A = gene_A,probe_gene_B = gene_B,othman_a = 0.5,othman_b = 0.5)
+    }
+    print(proc.time()-start_time)
+  }
+ 
+}
+write.table(dist_matr_min, file="D:\\Projects\\R\\DistMatrixMIN.txt", row.names=TRUE, col.names=TRUE)
+write.table(dist_matr_sum, file="D:\\Projects\\R\\DistMatrixSUM.txt", row.names=TRUE, col.names=TRUE)
+
+```
+делаем большой граф и пересекаем потомков
+```{r}
+library(igraph)
+library(GOSim)
+library(hu6800.db)
+library(multtest)
+data(golub)
+db=hu6800.db
+columns(db)
+d_set =golub
+data("ICsBPhumanall")
+par_GO=getParents()
+anc_GO = getAncestors()
+gene_sim=function(probe_gene_A,probe_gene_B,othman_a,othman_b){
+    res_sel_A = AnnotationDbi::select(db,keys =probe_gene_A ,columns = c("PROBEID","GO"))
+    GOs_A = dplyr::filter(res_sel_A[2], res_sel_A[4]=="BP" ) 
+    GOs_A=unlist(GOs_A)
+   
+    res_sel_B = AnnotationDbi::select(db,keys =probe_gene_B,columns = c("PROBEID","GO"))
+    GOs_B = dplyr::filter(res_sel_B[2], res_sel_B[4]=="BP" ) 
+    GOs_B=unlist(GOs_B)
+   
+    probe_dist=Inf
+    anc_com =c("GO:0008150")
+    all_GOs=union( GOs_A,GOs_B)
+    G=getGOGraph(all_GOs)
+    e_mean=length(G@edgeData@data)/length(G@nodes)
+    DAG=igraph.from.graphNEL(G)
+    for(i in 1:length(GOs_A)){
+        for (j in 1:length(GOs_B)) {
+          anc_A= anc_GO[GOs_A[i]]
+          anc_B= anc_GO[GOs_B[j]]
+          anc_com= union(anc_com,intersect(anc_A[1],anc_B[1]))
+        }
+    }
+            stack_df= data.frame(all_GOs,stringsAsFactors =F)
+            names(stack_df)=c("GOs")
+            stack_pointer=1
+            sum_dist=0
+            while (nrow(stack_df)>=stack_pointer) {
+              c_node=stack_df$GOs[stack_pointer]
+              rod= ego(graph = DAG,nodes = c_node,mode = "out",mindist = 1)
+              for (p_node in names(rod[[1]])) {
+                e_loc= length(ego(graph = DAG,nodes = p_node,mode = "in", mindist=1)[[1]])
+                d_p=distances(graph = DAG,v = p_node,to = "all")
+                t_cp=1
+                if (p_node%in% par_GO[[c_node]][grep("is_a",names( par_GO[[c_node]]))]){
+                  t_cp=0.8
+                }
+                  if (p_node%in% par_GO[[c_node]][grep("part_of",names( par_GO[[c_node]]))]){
+                  t_cp=0.6
+                }
+                w=(othman_b+(1-othman_b)*e_mean/e_loc)*(((d_p+1)/d_p)**othman_a)*(IC[c_node]-IC[p_node])*t_cp
+                if(!is.na(w)&(w!=Inf) &(w!=-Inf)){
+                  sum_dist=sum_dist+w
+                  if (!(p_node%in%anc_com ) & !(p_node%in%stack_df$GOs)) {
+                      stack_df=rbind(stack_df,p_node)
+                  }
+                }
+              }
+            stack_pointer=stack_pointer+1
+            }
+        probe_dist=sum_dist
+    return(probe_dist)
+      
+}
+
+
+rownames(d_set)=golub.gnames[,3]
+res_sel = AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","GO"))
+good_ids =unique (dplyr::filter(res_sel[1],!is.na(res_sel[2])&!is.na(res_sel[3]) ) )
+
+entr_sel=AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","ENTREZID"))
+print(length(golub.gnames[,3])) 
+cat("проб с entrez_id ",length(good_ids$PROBEID),"\n")
+d_set= d_set[unlist(good_ids$PROBEID),]
+dist_matr= matrix(nrow = nrow(d_set),ncol = nrow(d_set),dimnames = list(rownames(d_set),rownames(d_set)))
+
+start_time= proc.time()
+for (i in (1:length(good_ids$PROBEID))) {
+  cat("========= gene ", i, " ==========\n")
+  for (j in i:length(good_ids$PROBEID)) {
+    gene_A=rownames(d_set)[i]
+    gene_B=rownames(d_set)[j]
+    cat("гены ",gene_A,", ",gene_B,": ", i, ", ",j ,"\n")
+    if (i==j){
+      dist_matr[gene_A,gene_B]= 0
+    }
+    else{
+    dist_matr[gene_A,gene_B]= gene_sim(probe_gene_A = gene_A,probe_gene_B = gene_B,othman_a = 0.5,othman_b = 0.5)
+    }
+    print(proc.time()-start_time)
+  }
+ 
+}
+write.table(dist_matr, file="D:\\Projects\\R\\DistMatrix.txt", row.names=TRUE, col.names=TRUE)
+
+```
+наиболее информативный
+```{r}
+set_size=300
+library(igraph)
+library(GOSim)
+library(hu6800.db)
+library(multtest)
+data(golub)
+db=hu6800.db
+columns(db)
+d_set =golub
+data("ICsBPhumanall")
+par_GO=getParents()
+anc_GO = getAncestors()
+rownames(d_set)=golub.gnames[,3]
+res_sel = AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","GO"))
+good_ids =unique (dplyr::filter(res_sel[1],!is.na(res_sel[2])&!is.na(res_sel[3])& res_sel[4]=="BP" ) )
+
+entr_sel=AnnotationDbi::select(db,keys =golub.gnames[,3] ,columns = c("PROBEID","ENTREZID"))
+ 
+cat("проб с entrez_id ",length(good_ids$PROBEID),"\n")
+d_set= d_set[sample(x=good_ids$PROBEID,size=set_size),]
+dist_matr_max= matrix(nrow = nrow(d_set),ncol = nrow(d_set),dimnames = list(rownames(d_set),rownames(d_set)))
+gene_sim=function(probe_gene_A,probe_gene_B,othman_a,othman_b){
+    res_sel_A = AnnotationDbi::select(db,keys =probe_gene_A ,columns = c("PROBEID","GO"))
+    GOs_A = unique(dplyr::filter(res_sel_A[2], res_sel_A[4]=="BP" ))
+    GOs_A=unlist(GOs_A)
+    res_sel_B = AnnotationDbi::select(db,keys =probe_gene_B,columns = c("PROBEID","GO"))
+    GOs_B = unique(dplyr::filter(res_sel_B[2], res_sel_B[4]=="BP" )) 
+    GOs_B=unlist(GOs_B)
+    max_a=GOs_A[1]
+    for (go_a in GOs_A) {
+      if(!is.na(IC[go_a])&IC[go_a]!=Inf){
+        if(IC[go_a]>IC[max_a]){
+          max_a=go_a
+        }
+      }
+    }
+    max_b=GOs_B[1]
+    for (go_b in GOs_B) {
+      if(!is.na(IC[go_b])&IC[go_b]!=Inf){
+            if(IC[go_b]>IC[max_b]){
+            max_b=go_b
+          }
+      }
+    }
+    G=getGOGraph(union(GOs_A,GOs_B))
+    DAG=igraph.from.graphNEL(G)
+    e_mean=length(G@edgeData@data)/length(G@nodes)
+    sum_d=0
+        if(max_a==max_b){
+          sum_d=0
+        }
+    else{
+            anc_A= anc_GO[max_a]
+            anc_B= anc_GO[max_b]
+            anc_com= intersect(anc_A[[1]],anc_B[[1]])
+            # stack_df= data.frame(c(GOs_A[i],GOs_B[j]),stringsAsFactors =F)
+            stack_list=c(max_a,max_b)
+            # names(stack_df)=c("GOs")
+            stack_pointer=1
+            while (length(stack_list)>=stack_pointer) {
+              # c_node=stack_df$GOs[stack_pointer]
+                      c_node=stack_list[stack_pointer]
+                      rod= ego(graph = DAG,nodes = c_node,mode = "out",mindist = 1)
+                      d_c=distances(graph = DAG,v = c_node,to = "all")[1,1]
+                      for (p_node in names(rod[[1]])) {
+                        e_loc= length(ego(graph = DAG,nodes = p_node,mode = "in", mindist=1)[[1]])
+                        d_p=d_c-1
+                        t_cp=1
+                        if (p_node%in% par_GO[[c_node]][grep("is_a",names( par_GO[[c_node]]))]){
+                          t_cp=0.8
+                        }
+                        if (p_node%in% par_GO[[c_node]][grep("part_of",names( par_GO[[c_node]]))]){
+                          t_cp=0.6
+                        }
+                        w=(othman_b+(1-othman_b)*e_mean/e_loc)*(((d_p+1)/d_p)**othman_a)*(IC[c_node][[1]]-IC[p_node][[1]])*t_cp
+                        if(!is.na(w)&(w!=Inf) &(w!=-Inf)){
+                          sum_d=sum_d+w
+                          if (!(p_node%in%anc_com )) {
+                            if(  !(p_node%in%stack_list)){
+                              # stack_df=rbind(stack_df,p_node)
+                              stack_list=c(stack_list,p_node)
+                            }
+                          }
+                        }
+                      }
+             
+            stack_pointer=stack_pointer+1
+            }
+    }
+    return(sum_d)
+}
+
+start_time= proc.time()
+for (i in (1:nrow(d_set))) {
+  cat("========= gene ", i, " ==========\n")
+  for (j in i:nrow(d_set)) {
+    gene_A=rownames(d_set)[i]
+    gene_B=rownames(d_set)[j]
+    cat("гены ",gene_A,", ",gene_B,": ", i, ", ",j ,"\n")
+    if (i==j){
+      dist_matr_max[gene_A,gene_B]=0
+    }
+    else{
+    dist_matr_max[gene_A,gene_B]= gene_sim(probe_gene_A = gene_A,probe_gene_B = gene_B,othman_a = 0.5,othman_b = 0.5)
+    }
+    print(proc.time()-start_time)
+  }
+ 
+}
+write.table(dist_matr_max, file="D:\\Projects\\R\\DistMatrixMAX.txt", row.names=TRUE, col.names=TRUE)
+
+for (i in (1:nrow(d_set))) {
+ 
+  for (j in 1:i) {
+    dist_matr_max[i,j]= dist_matr_max[j,i]
+  }
+}  
+write.table(dist_matr_max, file="D:\\Projects\\R\\DistMatrixMAXsym.txt", row.names=TRUE, col.names=TRUE)
+
+```
+
+иерархическая кластеризация
+```{r}
+d=as.dist(dist_matr_max)
+h=hclust(d)
+plot(h,cex=0.01,hang=-1)
 ```
 
 Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.

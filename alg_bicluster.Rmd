@@ -1,0 +1,587 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Проверка качества разбиения по генам
+```{r}
+library(gplots)
+library(multtest)
+library(vegan)
+library(stats)
+library(biclust)
+library(hu6800.db)
+library(GOfuncR)
+db=hu6800.db
+data(golub)
+d_set=golub
+dist_matr= read.table(file = "D:\\Projects\\R\\DistMatrixMAXsym.txt", row.names = 1,sep=" ", comment.char = "")
+colnames(dist_matr)=rownames(dist_matr)
+some_ids= rownames(dist_matr)
+d=as.dist(dist_matr)
+hr=hclust(d,method = "ward.D2")
+cl_count=50
+plot(hr,cex=0.01,hang=-1)
+grp=cutree(hr,k=cl_count)
+rect.hclust(hr,k=cur_clust,border = 2:cl_count+1 )
+hyp_bg_ids <-  AnnotationDbi::select(db,keys = golub.gnames[,3] ,columns = c("PROBEID","SYMBOL"))
+a_tr=0.05
+find_sign_go =function (bic_rows){
+hyp_cand_ids<- AnnotationDbi::select(db,keys = bic_rows ,columns = c("PROBEID","SYMBOL"))
+hyp_bg_ids <-dplyr::filter(hyp_bg_ids,!is.na(hyp_bg_ids[2]) & !(hyp_bg_ids[2] %in% hyp_cand_ids[2,]) )
+hyp_cand_ids <- dplyr::filter(hyp_cand_ids,!is.na(hyp_cand_ids[2]) )
+hyp_is_cand <- c(rep(1,length(hyp_cand_ids$SYMBOL)), rep(0,length(hyp_bg_ids$SYMBOL)))
+input_hyper_bg = data.frame(gene_ids = c(hyp_cand_ids$SYMBOL, hyp_bg_ids$SYMBOL), hyp_is_cand)
+res_hyper_bg = go_enrich(input_hyper_bg, n_randsets=100,orgDb = 'hu6800.db',silent = TRUE)
+(return (res_hyper_bg))
+}
+
+
+dt_enrich=data.frame()
+
+for (i in 1:cl_count){
+    bic_rows <- some_ids[grp==i]
+    GOs_count= length(AnnotationDbi::select(db,keys = bic_rows ,columns = c("PROBEID","GO"))$GO)
+    res_hyper = find_sign_go(bic_rows)
+     a_tr=0.05
+    smu1 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.1
+    smu2 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.2
+    smu3 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.3
+    smu4 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    
+    a_tr=0.05
+    smo1 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.1
+    smo2 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.2
+    smo3 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.3
+    smo4 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+  cat("\n ",i , "\n under:\n", smu1, "\n over: \n",smo1)
+  dt_enrich=rbind(dt_enrich,c(i,smu1,smu2,smu3,smu4,smo1,smo2,smo3,smo4, GOs_count, sum(grp==i)))
+  names(dt_enrich)=c("num","u_0.05","u_0.1", "u_0.2", "u_0.3","o_0.05","o_0.1", "o_0.2", "o_0.3", "GOS", "genes")
+}
+write.table(dt_enrich,file = "D:\\Projects\\R\\hyper_my_3.txt",sep = "\t")
+```
+
+
+
+
+иерархическая кластеризация
+```{r}
+library(gplots)
+library(multtest)
+library(vegan)
+library(stats)
+library(biclust)
+k_clust=20
+n=300
+m=38
+data(golub)
+d_set=golub
+rownames(d_set)=golub.gnames[,3]
+dist_matr= read.table(file = "D:\\Projects\\R\\DistMatrixMAXsym.txt", row.names = 1,sep=" ", comment.char = "")
+colnames(dist_matr)=rownames(dist_matr)
+some_ids= rownames(dist_matr)
+d_set=d_set[some_ids,]
+d=as.dist(dist_matr)
+hr=hclust(d,method = "ward.D2")
+Z=matrix(runif(k_clust*ncol(d_set)),nrow=k_clust,ncol=ncol(d_set)) #матрица Z
+g=matrix(0,nrow=k_clust,ncol=ncol(d_set)) #индикаторы для колонок
+V=matrix(0,nrow=nrow(d_set),ncol=k_clust)
+sim_matr= apply(dist_matr, c(1,2),  function(x) { 1/(1+x) })
+rownames(V)=some_ids
+cl_means=integer(k_clust)
+last_cl=0
+for(cur_clust in c(6,14)){
+plot(hr,cex=0.01,hang=-1)
+grp=cutree(hr,k=cur_clust)
+rect.hclust(hr,k=cur_clust,border = 2:cur_clust+1 )
+for (i in 1:cur_clust) {
+  h_data = d_set[grp==i,]
+  if(sum(grp==i)>1){
+    h_dist= dist_matr[rownames(h_data),rownames(h_data)]
+    cl_means[last_cl+i]=mean(as.matrix(sim_matr))
+  }
+  else{
+    cl_means[last_cl+i]=1
+  }
+}
+for (gene in some_ids){
+    V[gene,last_cl+grp[gene]]=cl_means[last_cl+grp[gene]]
+  
+}
+last_cl=cur_clust
+}
+qFunc=function(z){
+  mZ=matrix(z,nrow = k_clust,byrow = T)
+  val =(norm(d_set-V%*%mZ,type = "f")**2)
+  for(cl in 1:k_clust){
+    val=val + 0.5*sum(mZ[cl,]*g[cl,]*mZ[cl,])
+  }
+  val
+}
+d_svd=svd(x=d_set,nu = k_clust,nv=k_clust)
+for (i in 1:min(nrow(d_svd$v),nrow(Z))) {
+  for(j in 1:min(ncol(d_svd$v),ncol(Z))){
+    Z[i,j]=d_svd$v[i,j]*sqrt(d_svd$d[i])
+  }
+}
+ro1=rep(0,k_clust)
+for (i in 1:k_clust) {
+  ro1[i]=sd(Z[i,])
+}
+ro2=ro1/10
+alpha =rep(0.5,k_clust)
+sigma = (norm(d_set-V%*%Z,type = "f")**2)/(dim(d_set)[1]*dim(d_set)[2])
+last_ELL=Inf
+while(TRUE){
+#e_step
+  for (cl in  1 : k_clust){
+        g[cl,] = alpha[cl]*dnorm(Z[cl,],0,sqrt(ro1[cl]))/                (alpha[cl]*dnorm(Z[cl,],0,sqrt(ro1[cl]))+(1-alpha[cl])*dnorm(Z[cl,],0,sqrt(ro2[cl])))
+  }
+    G = apply(g,FUN=function(x){x/ro1+(1-x)/ro2},MARGIN = c(2))
+#LL_func  
+  
+ # ELL=-(n*m/2)*log(sigma**2)-(norm(d_set-V%*%Z,type = "f")**2)/(2*sigma**2)  - sum(apply(G,FUN=function(x){x*log(ro1)+(1-x)*log(ro2)},MARGIN = c(2))) +sum(apply(g, FUN=function(x){x*log(alpha/(1-alpha))},MARGIN = c(2)))+sum(k_clust*m*log(1-alpha))
+   ELL=-(n*m/2)*log(sigma**2)-(norm(d_set-V%*%Z,type = "f")**2)/(2*sigma**2)  - sum(apply(g,FUN=function(x){x*log(ro1)+(1-x)*log(ro2)},MARGIN = c(2))) +sum(apply(g, FUN=function(x){x*alpha},MARGIN = c(2)))-sum(apply(g, FUN=function(x){(1-x)*(1-alpha)},MARGIN = c(2)))
+  for(cl in 1:k_clust){
+    ELL=ELL - 0.5*sum(Z[cl,]*G[cl,]*Z[cl,])
+  }
+print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")  
+print(abs(last_ELL-ELL))
+if(abs(last_ELL-ELL)<0.1){
+  break()
+}
+#m_step
+sigma=(sum((d_set - V%*%Z)**2)/(n*m))^2
+p0=as.vector(t(Z))
+ans=optim(p0,qFunc)
+#ans=constrOptim.nl(par=p0, fn=qFunc, heq=heq,control.outer=list(c(1.05,0.1,0.1,100,TRUE, "BFGS",FALSE)))
+Z=matrix(data=ans$par,nrow = k_clust, ncol=ncol(d_set),byrow = TRUE)
+ for (cl in  1 : k_clust){
+    ro1[cl] = sum(Z[cl,]*g[cl,]*Z[cl,])/sum(g[cl,])
+    alpha[cl] = sum(g[cl,])/(sum(g[cl,])+sum(1-g[cl,]))
+ }
+last_ELL=ELL
+}
+```
+```{r}
+library(GOfuncR)
+library(hu6800.db)
+library(GOfuncR)
+a_tr=0.05
+find_sign_go =function (bic_rows){
+hyp_cand_ids<- select(db,keys = bic_rows ,columns = c("PROBEID","SYMBOL"))
+hyp_bg_ids <-  select(db,keys = golub.gnames[,3] ,columns = c("PROBEID","SYMBOL"))
+hyp_bg_ids <-dplyr::filter(hyp_bg_ids,!is.na(hyp_bg_ids[2]) & !(hyp_bg_ids[2] %in% hyp_cand_ids[2,]) )
+hyp_cand_ids <- dplyr::filter(hyp_cand_ids,!is.na(hyp_cand_ids[2]) )
+hyp_is_cand <- c(rep(1,length(hyp_cand_ids$SYMBOL)), rep(0,length(hyp_bg_ids$SYMBOL)))
+input_hyper_bg = data.frame(gene_ids = c(hyp_cand_ids$SYMBOL, hyp_bg_ids$SYMBOL), hyp_is_cand) 
+res_hyper_bg = go_enrich(input_hyper_bg, n_randsets=100,orgDb = 'hu6800.db',silent = TRUE)
+(return (res_hyper_bg))
+}
+data(golub)
+db=hu6800.db
+some_Z= Z
+z_tr=0.5
+colnames(Z)=c(1:m)
+my_res=list()
+for(cl in 1:k_clust){
+     print("===============================")
+    v_cl=names(V[V[,cl]>0,cl])
+    z_cl=as.integer(names(Z[cl,abs(Z[cl,])<z_tr]))
+    print(cl)
+    print(golub.cl[z_cl])
+    out_v_z= matrix(1,nrow=length(v_cl),ncol=length(z_cl))
+    rownames(out_v_z)=v_cl
+    colnames(out_v_z)=z_cl
+    out_v_z=d_set[v_cl,z_cl]
+    #print(out_v_z)
+    res_hyper = find_sign_go(v_cl)
+    a_tr=0.05
+    smu1 =length(res_hyper$results$FWER_underrep[res_hyper$results$FWER_underrep<a_tr])
+    a_tr=0.1
+    smu2 =length(res_hyper$results$FWER_underrep[res_hyper$results$FWER_underrep<a_tr])
+    a_tr=0.2
+    smu3 =length(res_hyper$results$FWER_underrep[res_hyper$results$FWER_underrep<a_tr])
+    a_tr=0.3
+    smu4 =length(res_hyper$results$FWER_underrep[res_hyper$results$FWER_underrep<a_tr])
+    a_tr=0.05
+    smo1 =length(res_hyper$results$FWER_overrep[res_hyper$results$FWER_overrep<a_tr])
+    a_tr=0.1
+    smo2 =length(res_hyper$results$FWER_overrep[res_hyper$results$FWER_overrep<a_tr])
+    a_tr=0.2
+    smo3 =length(res_hyper$results$FWER_overrep[res_hyper$results$FWER_overrep<a_tr])
+    a_tr=0.3
+    smo4 =length(res_hyper$results$FWER_overrep[res_hyper$results$FWER_overrep<a_tr])
+  cat("\n ",i , "\n under:\n", sm1, "\n over: \n",sm2)
+  elem = list(i,c(smu1,smu2,smu3,smu4),c(smo1,smo2,smo3,smo4))
+  names(elem)<- c("num","under","over")
+  my_res<-c(my_res,list(elem))
+}
+```
+
+Начальная инициализациия. Достаём данные, считаем по ним какие-то статистики. Оцениваем максимальное MSR. 
+Добавляем biclust и заводим переменную l для бикластеорв.
+```{r}
+#INIT
+library(multtest)
+data(golub)
+max_val<-max(golub)
+min_val<-min(golub)
+max_delta <- ((max_val-min_val)**2)/12
+mean_val<-mean(golub)
+med_val <- median(golub)
+cat(max_delta)
+library(biclust)
+rm(l)
+l=list()
+```
+Алгоритм Ченга И Чёрча
+Определение параметров: Если матрица получена случайным выбором значений из отрезка [a,b] , то её дельта параметр не больше чем (b-a)2/12. В нашем случае это 2.526235. Альфа как и в оригинальной статье 1.2. 
+```{r}
+#CHENG AND CHURCH
+start_d =0.001
+end_d=1
+step_d=0.01
+cc_count =(end_d-start_d)/step_d +1 
+print(cc_count)
+cc_num= 5
+cc_al=1.2
+l=list()
+for (cc in (0:(cc_count-1))){
+  d=start_d + cc * step_d
+  bic=biclust(golub, method=BCCC(), delta=d, alpha=cc_al, number=cc_num) 
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("CC", bic_num$Rows,bic_num$Cols, list(d,cc_al) )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  }
+ }
+ cat("общее количество бикластеров:",length(l))
+```
+BiMax
+```{r}
+#bimax
+l=list
+bimax_minr=3
+bimax_minc=3
+bimax_num=50
+bin_data <- binarize(golub,2) 
+res <- biclust(x=bin_data, method=BCBimax(), minr=bimax_minr, minc=bimax_minc, number=bimax_num)
+
+for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("BiMax", bic_num$Rows, bic_num$Cols, list(bimax_minr,bimax_minc,bimax_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+}
+ cat("общее количество бикластеров:",length(l))
+```
+```{r}
+#bimax c ограниченным числом столбцов ???
+
+bimax_minr=3
+bimax_minc=3
+bimax_maxc=20
+bimax_num=10
+bin_data <- binarize(golub,2)
+for (bimax_col in (5:20)){
+  res <- biclust(x=bin_data, method=BCrepBimax(), minr=bimax_minr, minc=bimax_minc, number=bimax_num,maxc=bimax_col)
+
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("BCrepBimax", bic_num$Rows,bic_num$Cols, list(bimax_minr,bimax_minc,bimax_col,bimax_num) )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  }
+}
+cat("общее количество бикластеров:",length(l))
+```
+Fabia
+```{r}
+library(fabia)
+l=list()
+fab_count= 5
+fab_num=10
+fab_sp_step=0.1
+for( i in  (1:fab_count)){
+  res<- fabia(X =golub,cyc = 500,p = fab_num,center=1,norm=1 )
+  rb <- extractBic(res)
+  for (fab_ind in (1:fab_num)){
+    elem = list("fabia", rb$numn[fab_ind,]$numng,rb$numn[fab_ind,]$numnp, list(500,fab_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+}
+cat("общее количество бикластеров:",length(l))
+#модернизация с разреженностьюBi
+for( i in  (1:fab_count)){
+  res<- fabias(X =golub,alpha= fab_sp_step*i,cyc = 500,p = fab_num,center=1,norm=1 )
+  rb <- extractBic(res)
+  for (fab_ind in (1:fab_num)){
+    elem = list("fabias", rb$numn[fab_ind,]$numng,rb$numn[fab_ind,]$numnp, list(500,fab_num))
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  
+  }
+}
+cat("общее количество бикластеров:",length(l))
+```
+Алгоритм спектральной бикластеризации
+```{r}
+
+rm(l)
+l=list()
+  bic=biclust(golub, method=BCSpectral(), minr=3,minc=3,normalization="bistochastization",numberOfEigenvalues =1) 
+  for (bic_num in biclusternumber(bic, number= 1:bic@Number)){
+    elem = list("spectral", bic_num$Rows,bic_num$Cols, list("log") )
+    names(elem)<- c("alg","rows","cols","params")
+    l<-c(l,list(elem))
+  }
+ cat("общее количество бикластеров:",length(l))
+```
+
+Пакет GoFUNCR для автоматического анализа и гепергеометрического теста
+```{r}
+a_tr=0.10
+# BiocManager::install('Homo.sapiens')
+# BiocManager::install("GOfuncR")
+library(GOfuncR)
+library(hu6800.db)
+db=hu6800.db
+hyp_bg_ids <-  AnnotationDbi::select(db,keys = golub.gnames[,3] ,columns = c("PROBEID","SYMBOL"))
+find_sign_go =function (bic_rows){
+hyp_cand_ids<- AnnotationDbi::select(db,keys = bic_rows ,columns = c("PROBEID","SYMBOL"))
+
+
+hyp_bg_ids <-dplyr::filter(hyp_bg_ids,!is.na(hyp_bg_ids[2]) & !(hyp_bg_ids[2] %in% hyp_cand_ids[2,]) )
+hyp_cand_ids <- dplyr::filter(hyp_cand_ids,!is.na(hyp_cand_ids[2]) )
+
+
+hyp_is_cand <- c(rep(1,length(hyp_cand_ids$SYMBOL)), rep(0,length(hyp_bg_ids$SYMBOL)))
+input_hyper_bg = data.frame(gene_ids = c(hyp_cand_ids$SYMBOL, hyp_bg_ids$SYMBOL), hyp_is_cand)  
+
+res_hyper_bg = go_enrich(input_hyper_bg, n_randsets=100,orgDb = 'hu6800.db',silent = TRUE)
+(return (res_hyper_bg))
+}
+l_enrich=list()
+dt_enrich=data.frame()
+
+for (i in 1:length(l)){
+  bic_rows <- golub.gnames[l[[i]]$rows,3] 
+
+    GOs_count= length(AnnotationDbi::select(db,keys = bic_rows ,columns = c("PROBEID","GO"))$GO)
+    res_hyper = find_sign_go(bic_rows)
+     a_tr=0.05
+    smu1 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.1
+    smu2 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.2
+    smu3 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.3
+    smu4 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    
+    a_tr=0.05
+    smo1 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.1
+    smo2 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.2
+    smo3 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.3
+    smo4 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+  cat("\n ",i , "\n under:\n", smu1, "\n over: \n",smo1)
+  dt_enrich=rbind(dt_enrich,c(i,smu1,smu2,smu3,smu4,smo1,smo2,smo3,smo4, GOs_count, length(bic_rows)))
+  names(dt_enrich)=c("num","u_0.05","u_0.1", "u_0.2", "u_0.3","o_0.05","o_0.1", "o_0.2", "o_0.3", "GOS", "genes")
+}
+write.table(dt_enrich,file = "D:\\Projects\\R\\hyper_fab.txt",sep = "\t")
+```
+Случайные множества генов
+```{r}
+rnd_cl=100
+library(GOfuncR)
+library(hu6800.db)
+library(multtest)
+data(golub)
+db=hu6800.db
+dt_enrich=data.frame()
+for (i in 1:rnd_cl){
+  rnd_count=runif(1,min=1,max=3051)
+  bic_rows=base::sample(golub.gnames[,3],rnd_count,replace = FALSE)
+    GOs_count= length(AnnotationDbi::select(db,keys = bic_rows ,columns = c("PROBEID","GO"))$GO)
+    res_hyper = find_sign_go(bic_rows)
+     a_tr=0.05
+    smu1 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.1
+    smu2 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.2
+    smu3 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.3
+    smu4 =length(res_hyper$results$raw_p_underrep[res_hyper$results$FWER_underrep<a_tr& res_hyper$results$raw_p_underrep<a_tr])
+    a_tr=0.05
+    smo1 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.1
+    smo2 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.2
+    smo3 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+    a_tr=0.3
+    smo4 =length(res_hyper$results$raw_p_overrep[res_hyper$results$FWER_overrep<a_tr&res_hyper$results$raw_p_overrep<a_tr])
+  cat("\n ",i , "\n under:\n", smu1, "\n over: \n",smo1)
+  dt_enrich=rbind(dt_enrich,c(i,smu1,smu2,smu3,smu4,smo1,smo2,smo3,smo4, GOs_count, length(bic_rows)))
+  names(dt_enrich)=c("num","u_0.05","u_0.1", "u_0.2", "u_0.3","o_0.05","o_0.1", "o_0.2", "o_0.3", "GOS", "genes")
+}
+write.table(dt_enrich,file = "D:\\Projects\\R\\hyper_RND.txt",sep = "\t")
+```
+
+PERMANOVA для бикластеров( если anova pr(F) больше 0,05 то можем применять)
+```{r}
+z_tr=0.5
+library(gplots)
+library(multtest)
+library(vegan)
+library(stats)
+rownames(golub) =golub.gnames[,3]
+for(cl in 1:k_clust){
+     print("===============================")
+      print(cl)
+    v_cl=names(V[V[,cl]>0,cl])
+    z_cl=as.integer(names(Z[cl,abs(Z[cl,])<z_tr]))
+     x=as.matrix(golub[v_cl,z_cl])
+     print(length(v_cl))
+    if(length(v_cl)>1){
+      x=t(x)
+    }
+    gol_cl =as.matrix(golub.cl[z_cl],ncol=1,byrow=T)
+    colnames(gol_cl)=c("class")
+    colnames(x)=v_cl
+    x=cbind(x,Class=gol_cl)
+    x=as.data.frame(x)
+    dist_pesch <- vegdist(x[,1:length(v_cl)], method  = "euclidean")
+    PCO_pesch <- betadisper(dist_pesch, x$class)
+    gom_d=anova(PCO_pesch)
+    print(gom_d$`Pr(>F)`)
+    boxplot(PCO_pesch)
+    permanova_pesch <- adonis(x[1:length(v_cl)] ~ x$class, method = "euclidian",permutations = 999)
+    print(permanova_pesch$aov.tab$`Pr(>F)`)
+    permanova_pesch
+}
+```
+```{r}
+library(ggplot2)
+z_tr=0.5
+library(gplots)
+library(multtest)
+library(vegan)
+library(stats)
+rownames(golub) =golub.gnames[,3]
+for(cl in 1:k_clust){
+    v_cl=names(V[V[,cl]>0,cl])
+    z_cl=as.integer(names(Z[cl,abs(Z[cl,])<z_tr]))
+     x=as.matrix(golub[v_cl,z_cl])
+    if(length(v_cl)>1){
+      x=t(x)
+    }
+    gol_cl =as.matrix(golub.cl[z_cl],ncol=1,byrow=T)
+    colnames(gol_cl)=c("class")
+    colnames(x)=v_cl
+    x=cbind(x,Class=gol_cl)
+    x=as.data.frame(x)
+   com_anosim <- anosim(x, 
+           grouping = x$class, 
+           permutations = 9999, 
+           distance = "euclidian")
+  cat(length(v_cl),"*",com_anosim$statistic,"*",com_anosim$signif,"\n")
+}
+```
+Результаты anosim
+```{r}
+summary(com_anosim)
+plot(com_anosim)
+```
+```{r}
+library(multtest)
+library(plotly)
+data(golub)
+m=as.matrix((d_set[hr$order,]))
+p <- plot_ly(
+    x = seq(1:38) , y =rownames(dist_matr),
+    z = m, type = "heatmap"
+)
+p
+```
+
+
+```{r}
+library(igraph)
+library(GOSim)
+library(hu6800.db)
+ data("ICsBPhumanall")
+db=hu6800.db
+data("ICsBPhumanall")
+othman_a =0.5
+othman_b=0.5
+probe_gene_A= "AFFX-HUMISGF3A/M97935_MB_at"
+probe_gene_B= "AFFX-HUMISGF3A/M97935_MA_at"
+par_GO=getParents()
+anc_GO = getAncestors()
+res_sel_A = AnnotationDbi::select(db,keys =rownames(dist_matr) ,columns = c("PROBEID","ENTREZID","GO"))
+GOs_A = unique(dplyr::filter(res_sel_A[3], res_sel_A[5]=="BP" ))
+GOs_A=unlist(GOs_A)
+G=getGOGraph(GOs_A)
+G
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+```{r}
+library(gplots)
+
+dist=as.dist(dist_matr)
+hr=hclust(dist,method = "ward.D2")
+
+
+# create some data
+
+res=list()
+for(cl in 10:10){
+   d <- matrix(0,nrow=nrow(d_set),ncol=ncol(d_set))
+    rownames(d)=rownames(d_set)
+    colnames(d)=colnames(d_set)
+    v_cl=names(V[V[,cl]>0,cl])
+    z_cl=as.integer(names(Z[cl,abs(Z[cl,])<z_tr]))
+    d[v_cl,z_cl]=matrix(1,nrow=length(v_cl),ncol=length(z_cl))
+    f=c(z_cl,base::setdiff(seq(1:38),z_cl))
+    Y=rownames(dist_matr)[hr$order]
+    
+     p <- plot_ly(
+     x = seq(1:38) , y =rownames(dist_matr),
+     z = d, type = "heatmap"
+   )
+}
+# p <- plot_ly(
+#     x = c("2","3","1") , y =c("6","4","8"),
+#     z = d[c(1,2,3),c(1,2,3)], type = "heatmap")
+
+p
+# # choose a color palette for the heat map
+# myheatcol <- rev(redgreen(75))
+# 
+# # draw the heat map
+# heatmap.2(d, main="Hierarchical Cluster", Rowv=as.dendrogram(hr), Colv=NA, dendrogram="row", scale="row", col=myheatcol, density.info="none", trace="none")
+
+
+
+
+```
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
